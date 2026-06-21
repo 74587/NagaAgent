@@ -15,7 +15,7 @@
 
 [简体中文](README.md) | [English](README_en.md) | [日本語](README_ja.md)
 
-![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.0-blue?style=for-the-badge&logo=python&logoColor=white)
+![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.1-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPL%203.0%20%7C%20Proprietary-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
@@ -40,6 +40,12 @@
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 🚀 2026-06-20 | 5.1.1 | 自定义 Live2D 模型设置上线：终端设置与角色注册支持上传完整模型目录，模型保存到用户数据目录并按当前 API 端口动态注入 |
+| 🧭 2026-06-20 | — | 网络探索控制中心增强：可按干员创建 OpenClaw 探索任务，设置时间 / 积分上限与初始浏览器策略，运行中切换浏览器可见性并查看原始历史 |
+| 🛡️ 2026-06-20 | — | 全栈运行链路加固：未登录 / 开源模式清空旧 token，本地模型占位 API Key 拒绝代理请求，OpenClaw 自动补齐 gateway / hooks 运行时配置 |
+| 🧰 2026-06-20 | — | MCP 与 GUI 模型配置改进：SSE 增加 `tool_calls` / `tool_results`，前端结构化折叠完整工具结果；新增 `provider` 与 `use_gateway` 模型配置 |
+| 🪟 2026-06-20 | — | Skill 路径安全与悬浮窗拖拽修复：导入 / 克隆 / 读取 / 删除 Skill 时拒绝路径穿越名称；展开态拖拽暂停高度自适应避免窗口抖动 |
+| 🔌 2026-05-10 | — | 未登录或关闭网关时直连用户自配 API，避免误走 NagaBusiness 扣积分；登出后同步 OpenClaw 切回本地模型配置；移除本地异常脚本 |
 | 🔧 2026-04-15 | — | 配置同步重构：source config 与 runtime config 双向合并；ASR 健康检查 URL 改用配置值；服务端口获取与配置路径重构 |
 | 🤖 2026-04-14 | — | 新增 Anthropic API 格式支持（`api_format` 字段）；五元组提取器兼容 Anthropic SDK；Live2D 空文本调用处理 |
 | 🐛 2026-04-12 | — | 修复 py2neo `Graph()` timeout 参数不兼容与 Neo4j 连接状态误报 |
@@ -570,7 +576,7 @@ NagaAgent/
 ├── main.py                   # 统一入口，编排所有服务
 ├── build.py                  # 跨平台构建脚本
 ├── config.json               # 运行时配置（从 config.json.example 复制）
-├── pyproject.toml            # 版本 5.1.0，项目元数据与依赖
+├── pyproject.toml            # 版本 5.1.1，项目元数据与依赖
 │
 ├── apiserver/                # API Server（:8000）
 │   ├── api_server.py         #   FastAPI 主应用

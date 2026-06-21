@@ -14,7 +14,7 @@ Nagaの未来は、あなた自身で切り拓いてください。
 
 [简体中文](README.md) | [English](README_en.md) | [日本語](README_ja.md)
 
-![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.0-blue?style=for-the-badge&logo=python&logoColor=white)
+![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.1-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPL%203.0%20%7C%20Proprietary-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
@@ -38,6 +38,12 @@ Nagaの未来は、あなた自身で切り拓いてください。
 
 | 日付 | バージョン | 変更内容 |
 |------|---------|---------|
+| 🚀 2026-06-20 | 5.1.1 | カスタム Live2D モデル設定を追加：端末設定とキャラクター登録から完全なモデルディレクトリをアップロードし、ユーザーデータ配下に保存して現在の API ポートで動的にモデル URL を注入 |
+| 🧭 2026-06-20 | — | ネットワーク探索コントロールセンターを強化：エージェントごとの OpenClaw 探索タスク作成、時間 / クレジット上限と初期ブラウザポリシー設定、実行中のブラウザ表示切替、原始履歴確認に対応 |
+| 🛡️ 2026-06-20 | — | フルスタック実行フローを強化：ログアウト / オープンソースモードで古い token を消去、ローカルモデルのプレースホルダー API Key を拒否、OpenClaw gateway / hooks ランタイム設定を自動補完 |
+| 🧰 2026-06-20 | — | MCP と GUI モデル設定を改善：SSE に `tool_calls` / `tool_results` を追加し、フロントエンドで完全な構造化ツール結果を表示；`provider` / `use_gateway` モデル設定を追加 |
+| 🪟 2026-06-20 | — | Skill パス安全性とフローティングウィンドウのドラッグを修正：import / clone / read / delete 時にパストラバーサル名を拒否；展開状態のドラッグ中は高さ自動調整を一時停止して揺れを防止 |
+| 🔌 2026-05-10 | — | 未ログインまたはゲートウェイ無効時はユーザー設定 API に直接接続し、意図しない NagaBusiness クレジット消費を回避；ログアウト時に OpenClaw をローカルモデル設定へ同期；ローカル異常スクリプトを削除 |
 | 🔧 2026-04-15 | — | 設定同期リファクタリング：source config と runtime config の双方向マージ；ASRヘルスチェックURLが設定値を使用；サービスポート取得と設定パスの再構築 |
 | 🤖 2026-04-14 | — | Anthropic APIフォーマットサポートを追加（`api_format`フィールド）；五つ組抽出器がAnthropic SDKに対応；Live2D空テキスト呼び出しの処理 |
 | 🐛 2026-04-12 | — | py2neo `Graph()` timeoutパラメータの非互換とNeo4j接続状態の誤検知を修正 |
@@ -563,7 +569,7 @@ NagaAgent/
 ├── main.py                   # 統一エントリーポイント、全サービスをオーケストレーション
 ├── build.py                  # クロスプラットフォームビルドスクリプト
 ├── config.json               # ランタイム設定（config.json.exampleからコピー）
-├── pyproject.toml            # バージョン5.1.0、プロジェクトメタデータ & 依存関係
+├── pyproject.toml            # バージョン5.1.1、プロジェクトメタデータ & 依存関係
 │
 ├── apiserver/                # API Server (:8000)
 │   ├── api_server.py         #   FastAPIメインアプリ
