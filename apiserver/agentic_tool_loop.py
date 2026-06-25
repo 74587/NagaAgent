@@ -17,6 +17,7 @@ import httpx
 from system.config import get_config, get_server_port
 from apiserver.agent_directory import format_agent_directory_text, resolve_agent_descriptor
 from apiserver import naga_auth
+from apiserver.tool_schemas import resolve_mcp_func_name
 
 logger = logging.getLogger(__name__)
 
@@ -1268,6 +1269,9 @@ def _convert_native_to_dispatch(native_calls: List[Dict[str, Any]]) -> List[Dict
     - openclaw__agent → agentType="openclaw", task_type="message"
     - live2d__action → agentType="live2d"
     - naga_control__command → agentType="naga_control"
+
+    MCP 工具名在生成时可能被 sanitize（service_name/command 含中文等非法字符），
+    故优先用 resolve_mcp_func_name() 反查还原原始名，查不到再 fallback 到 split。
     """
     result = []
     for call in native_calls:
@@ -1292,8 +1296,13 @@ def _convert_native_to_dispatch(native_calls: List[Dict[str, Any]]) -> List[Dict
             dispatch["tool_name"] = parts[1]
             dispatch["args"] = args
         elif agent_type == "mcp" and len(parts) >= 3:
-            dispatch["service_name"] = parts[1]
-            dispatch["tool_name"] = parts[2]
+            # 优先用反查映射还原原始 service_name/command（function name 可能被 sanitize 过）
+            resolved = resolve_mcp_func_name(name)
+            if resolved is not None:
+                dispatch["service_name"], dispatch["tool_name"] = resolved
+            else:
+                dispatch["service_name"] = parts[1]
+                dispatch["tool_name"] = parts[2]
             # MCP 工具参数直接展开到 dispatch 顶层（与现有格式一致）
             dispatch.update(args)
         elif agent_type == "openclaw":

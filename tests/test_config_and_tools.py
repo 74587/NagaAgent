@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -937,6 +938,112 @@ class ConfigAndToolTests(unittest.TestCase):
                     os.environ.pop("OPENCLAW_STATE_DIR", None)
                 else:
                     os.environ["OPENCLAW_STATE_DIR"] = old_state_dir
+
+
+class McpFuncNameSanitizeTests(unittest.TestCase):
+    """验证 MCP function name 的 sanitize 与还原。
+
+    OpenAI 要求 tools[*].function.name 匹配 ^[a-zA-Z0-9_-]+$，
+    而 MCP 的 service_name/command 可能含中文等非法字符，
+    需在生成时 sanitize、在解析时无损还原。
+    """
+
+    _PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+    def setUp(self) -> None:
+        from apiserver.tool_schemas import invalidate_schema_cache
+
+        invalidate_schema_cache()
+
+    def test_make_func_name_is_openai_compliant_and_roundtrips(self) -> None:
+        from apiserver.tool_schemas import _make_mcp_func_name, resolve_mcp_func_name
+
+        cases = [
+            ("app_launcher", "获取应用列表"),
+            ("app_launcher", "启动应用"),
+            ("天气时间Agent", "query"),
+            ("svc with space", "do/it:now"),
+        ]
+        for service_name, command in cases:
+            with self.subTest(service=service_name, command=command):
+                func_name = _make_mcp_func_name(service_name, command)
+                self.assertRegex(func_name, self._PATTERN)
+                self.assertEqual(
+                    resolve_mcp_func_name(func_name), (service_name, command)
+                )
+
+    def test_pure_ascii_keeps_legacy_naming(self) -> None:
+        from apiserver.tool_schemas import _make_mcp_func_name
+
+        # 纯 ASCII 名称保持原有命名约定，确保向后兼容
+        self.assertEqual(
+            _make_mcp_func_name("weather_time", "today_weather"),
+            "mcp__weather_time__today_weather",
+        )
+
+    def test_make_func_name_is_deterministic(self) -> None:
+        from apiserver.tool_schemas import _make_mcp_func_name
+
+        first = _make_mcp_func_name("app_launcher", "获取应用列表")
+        second = _make_mcp_func_name("app_launcher", "获取应用列表")
+        self.assertEqual(first, second)
+
+    def test_distinct_inputs_produce_distinct_names(self) -> None:
+        from apiserver.tool_schemas import _make_mcp_func_name
+
+        a = _make_mcp_func_name("app_launcher", "获取应用列表")
+        b = _make_mcp_func_name("app_launcher", "启动应用")
+        self.assertNotEqual(a, b)
+
+    def test_resolve_unknown_returns_none(self) -> None:
+        from apiserver.tool_schemas import resolve_mcp_func_name
+
+        self.assertIsNone(resolve_mcp_func_name("mcp__never__registered"))
+
+    def test_invalidate_keeps_mapping(self) -> None:
+        # _mcp_name_map 是 _make_mcp_func_name 的确定性缓存，刻意不随 schema
+        # 缓存清空，以免 MCP 注册变更打断「生成→解析」之间的还原能力。
+        from apiserver.tool_schemas import (
+            _make_mcp_func_name,
+            invalidate_schema_cache,
+            resolve_mcp_func_name,
+        )
+
+        func_name = _make_mcp_func_name("天气时间Agent", "query")
+        self.assertIsNotNone(resolve_mcp_func_name(func_name))
+        invalidate_schema_cache()
+        self.assertEqual(
+            resolve_mcp_func_name(func_name), ("天气时间Agent", "query")
+        )
+
+    def test_convert_native_to_dispatch_restores_original_names(self) -> None:
+        from apiserver.tool_schemas import _make_mcp_func_name
+        from apiserver.agentic_tool_loop import _convert_native_to_dispatch
+
+        func_name = _make_mcp_func_name("app_launcher", "获取应用列表")
+        native = [
+            {
+                "name": func_name,
+                "arguments": json.dumps({"keyword": "微信"}),
+                "id": "call_1",
+            }
+        ]
+        dispatch = _convert_native_to_dispatch(native)[0]
+        self.assertEqual(dispatch["agentType"], "mcp")
+        self.assertEqual(dispatch["service_name"], "app_launcher")
+        self.assertEqual(dispatch["tool_name"], "获取应用列表")
+        self.assertEqual(dispatch["keyword"], "微信")
+
+    def test_convert_native_to_dispatch_falls_back_to_split(self) -> None:
+        # 未经登记的纯 ASCII 名称仍能通过 split 还原
+        from apiserver.agentic_tool_loop import _convert_native_to_dispatch
+
+        native = [
+            {"name": "mcp__weather_time__today_weather", "arguments": "{}", "id": "c2"}
+        ]
+        dispatch = _convert_native_to_dispatch(native)[0]
+        self.assertEqual(dispatch["service_name"], "weather_time")
+        self.assertEqual(dispatch["tool_name"], "today_weather")
 
 
 if __name__ == "__main__":
