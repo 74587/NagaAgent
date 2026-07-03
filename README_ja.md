@@ -14,7 +14,7 @@ Nagaの未来は、あなた自身で切り拓いてください。
 
 [简体中文](README.md) | [English](README_en.md) | [日本語](README_ja.md)
 
-![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.1-blue?style=for-the-badge&logo=python&logoColor=white)
+![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.2-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPL%203.0%20%7C%20Proprietary-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
@@ -38,6 +38,7 @@ Nagaの未来は、あなた自身で切り拓いてください。
 
 | 日付 | バージョン | 変更内容 |
 |------|---------|---------|
+| 🔐 2026-07-03 | 5.1.2 | ローカルモデル API Key の保存処理を修正し、フロントエンドのプレースホルダーが実キーを上書きしないようにしました；空のストリーム応答はリトライ後に可視エラーを返します；DeepSeek Thinking Mode のツール呼び出しでは必要時のみ `reasoning_content` を再送します |
 | 🚀 2026-06-20 | 5.1.1 | カスタム Live2D モデル設定を追加：端末設定とキャラクター登録から完全なモデルディレクトリをアップロードし、ユーザーデータ配下に保存して現在の API ポートで動的にモデル URL を注入 |
 | 🧭 2026-06-20 | — | ネットワーク探索コントロールセンターを強化：エージェントごとの OpenClaw 探索タスク作成、時間 / クレジット上限と初期ブラウザポリシー設定、実行中のブラウザ表示切替、原始履歴確認に対応 |
 | 🛡️ 2026-06-20 | — | フルスタック実行フローを強化：ログアウト / オープンソースモードで古い token を消去、ローカルモデルのプレースホルダー API Key を拒否、OpenClaw gateway / hooks ランタイム設定を自動補完 |
@@ -569,7 +570,7 @@ NagaAgent/
 ├── main.py                   # 統一エントリーポイント、全サービスをオーケストレーション
 ├── build.py                  # クロスプラットフォームビルドスクリプト
 ├── config.json               # ランタイム設定（config.json.exampleからコピー）
-├── pyproject.toml            # バージョン5.1.1、プロジェクトメタデータ & 依存関係
+├── pyproject.toml            # バージョン5.1.2、プロジェクトメタデータ & 依存関係
 │
 ├── apiserver/                # API Server (:8000)
 │   ├── api_server.py         #   FastAPIメインアプリ

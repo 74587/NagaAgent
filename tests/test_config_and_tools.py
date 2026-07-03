@@ -817,6 +817,73 @@ class ConfigAndToolTests(unittest.TestCase):
         ):
             self.assertFalse(openai_proxy._is_user_configured_api())
 
+    def test_openai_proxy_rejects_placeholder_api_on_custom_base_url(self) -> None:
+        class _ProxyApiSettings:
+            base_url = "https://local.example/v1"
+            api_key = "your-api-key-here"
+
+        class _ProxySettings:
+            api = _ProxyApiSettings()
+
+        with (
+            patch.object(naga_auth, "should_use_model_gateway", lambda: False),
+            patch("system.config.config", _ProxySettings()),
+        ):
+            self.assertFalse(openai_proxy._is_user_configured_api())
+
+    def test_sanitize_system_config_payload_preserves_existing_real_api_key(self) -> None:
+        payload: dict[str, Any] = {
+            "api": {
+                "api_key": "your-api-key-here",
+                "base_url": "https://api.deepseek.com/v1",
+            }
+        }
+        current_config: dict[str, Any] = {
+            "api": {
+                "api_key": "sk-real-user-key",
+                "base_url": "https://api.deepseek.com/v1",
+            }
+        }
+
+        sanitized = _sanitize_system_config_payload(payload, current_config)
+
+        self.assertEqual(sanitized["api"]["api_key"], "sk-real-user-key")
+        self.assertEqual(payload["api"]["api_key"], "your-api-key-here")
+
+    def test_system_config_route_does_not_overwrite_real_api_key_with_placeholder(self) -> None:
+        async def _run_request() -> None:
+            captured_payload: dict[str, Any] = {}
+
+            def _capture_update_config(next_payload: dict[str, Any]) -> bool:
+                captured_payload.update(next_payload)
+                return True
+
+            current_config: dict[str, Any] = {
+                "api": {
+                    "api_key": "sk-real-user-key",
+                    "base_url": "https://api.deepseek.com/v1",
+                }
+            }
+            payload: dict[str, Any] = {
+                "api": {
+                    "api_key": "sk-placeholder-key-not-set",
+                    "base_url": "https://api.deepseek.com/v1",
+                }
+            }
+
+            transport = httpx.ASGITransport(app=api_app, raise_app_exceptions=False)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                with (
+                    patch("apiserver.routes.system.update_config", _capture_update_config),
+                    patch("apiserver.routes.system.get_config_snapshot", lambda: current_config),
+                ):
+                    response = await client.post("/system/config", json=payload)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(captured_payload["api"]["api_key"], "sk-real-user-key")
+
+        asyncio.run(_run_request())
+
     def test_sanitize_system_config_payload_removes_dynamic_live2d_source_without_mutating_input(self) -> None:
         payload: dict[str, Any] = {
             "web_live2d": {
@@ -1044,6 +1111,130 @@ class McpFuncNameSanitizeTests(unittest.TestCase):
         dispatch = _convert_native_to_dispatch(native)[0]
         self.assertEqual(dispatch["service_name"], "weather_time")
         self.assertEqual(dispatch["tool_name"], "today_weather")
+
+    def test_native_assistant_message_keeps_reasoning_for_tool_history(self) -> None:
+        from apiserver.agentic_tool_loop import _build_native_assistant_message
+
+        message = _build_native_assistant_message(
+            "我来查一下",
+            [
+                {
+                    "_tool_call_id": "call_1",
+                    "_original_name": "tool__search",
+                    "_original_args": "{\"q\":\"naga\"}",
+                }
+            ],
+            "先判断需要搜索。",
+        )
+
+        self.assertEqual(message["reasoning_content"], "先判断需要搜索。")
+        self.assertEqual(message["tool_calls"][0]["id"], "call_1")
+
+    def test_llm_message_preparation_replays_reasoning_only_for_deepseek_tool_calls(self) -> None:
+        from apiserver.llm_service import LLMService
+
+        service = LLMService.__new__(LLMService)
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "assistant",
+                "content": None,
+                "reasoning_content": "需要调用工具。",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "tool__search", "arguments": "{}"},
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "普通回复",
+                "reasoning_content": "普通思考不应回传。",
+            },
+        ]
+
+        deepseek_messages = service._prepare_messages_for_model(
+            messages,
+            "deepseek/deepseek-v3.2",
+            "https://api.deepseek.com/v1",
+            "deepseek",
+        )
+        reasoner_messages = service._prepare_messages_for_model(
+            messages,
+            "deepseek/deepseek-reasoner",
+            "https://api.deepseek.com/v1",
+            "deepseek",
+        )
+
+        self.assertIn("reasoning_content", deepseek_messages[0])
+        self.assertNotIn("reasoning_content", deepseek_messages[1])
+        self.assertNotIn("reasoning_content", reasoner_messages[0])
+
+    def test_stream_chat_returns_visible_error_after_empty_stream_retries(self) -> None:
+        from apiserver.llm_service import LLMService
+
+        class _LlmApiSettings:
+            api_key = "sk-real-user-key"
+            base_url = "https://api.deepseek.com/v1"
+            model = "deepseek-v3.2"
+            provider = "deepseek"
+            use_gateway = False
+            api_format = "openai"
+            temperature = 0.7
+            max_tokens = 10000
+
+        class _LlmSettings:
+            api = _LlmApiSettings()
+
+        class _EmptyDelta:
+            content: None = None
+            reasoning_content: None = None
+            tool_calls: None = None
+
+        class _EmptyChoice:
+            delta = _EmptyDelta()
+            finish_reason = "stop"
+
+        class _EmptyChunk:
+            choices = [_EmptyChoice()]
+
+        class _EmptyStream:
+            def __init__(self) -> None:
+                self._sent = False
+
+            def __aiter__(self) -> "_EmptyStream":
+                return self
+
+            async def __anext__(self) -> _EmptyChunk:
+                if self._sent:
+                    raise StopAsyncIteration
+                self._sent = True
+                return _EmptyChunk()
+
+        async def _run_stream() -> None:
+            service = LLMService.__new__(LLMService)
+            service._initialized = True
+            attempts = 0
+
+            async def _fake_acompletion(**_kwargs: Any) -> _EmptyStream:
+                nonlocal attempts
+                attempts += 1
+                return _EmptyStream()
+
+            events: list[str] = []
+            with (
+                patch("apiserver.llm_service.get_config", lambda: _LlmSettings()),
+                patch("apiserver.llm_service.naga_auth.should_use_model_gateway", lambda: False),
+                patch("apiserver.llm_service.acompletion", _fake_acompletion),
+            ):
+                async for event in service.stream_chat_with_context([{"role": "user", "content": "你好"}]):
+                    events.append(event)
+
+            self.assertEqual(attempts, 3)
+            self.assertTrue(any("模型服务返回空响应" in event for event in events))
+
+        asyncio.run(_run_stream())
 
 
 if __name__ == "__main__":

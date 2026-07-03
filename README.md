@@ -15,7 +15,7 @@
 
 [简体中文](README.md) | [English](README_en.md) | [日本語](README_ja.md)
 
-![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.1-blue?style=for-the-badge&logo=python&logoColor=white)
+![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.2-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPL%203.0%20%7C%20Proprietary-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
@@ -40,6 +40,7 @@
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 🔐 2026-07-03 | 5.1.2 | 修复本地模型 API Key 保存链路，避免前端占位密钥覆盖真实密钥；空流式响应改为重试并给出可见错误；DeepSeek Thinking Mode 工具调用按需保留 `reasoning_content` |
 | 🚀 2026-06-20 | 5.1.1 | 自定义 Live2D 模型设置上线：终端设置与角色注册支持上传完整模型目录，模型保存到用户数据目录并按当前 API 端口动态注入 |
 | 🧭 2026-06-20 | — | 网络探索控制中心增强：可按干员创建 OpenClaw 探索任务，设置时间 / 积分上限与初始浏览器策略，运行中切换浏览器可见性并查看原始历史 |
 | 🛡️ 2026-06-20 | — | 全栈运行链路加固：未登录 / 开源模式清空旧 token，本地模型占位 API Key 拒绝代理请求，OpenClaw 自动补齐 gateway / hooks 运行时配置 |
@@ -159,7 +160,7 @@ pip install -r requirements.txt
 
 支持所有 OpenAI 兼容 API（DeepSeek、通义千问、OpenAI、Ollama 等），也支持 Anthropic 原生格式（将 `api_format` 设为 `"anthropic"`）。登录 Naga 后默认使用 NagaModel 网关；如需使用本地密钥，在设置页关闭“使用 NagaModel 网关”，或将 `use_gateway` 设为 `false`。
 
-未登录或选择“不登录，使用开源版本”时会进入本地配置模式并清空前端旧 token；此时 `api.api_key` 必须替换为真实密钥，`your-api-key-here` 和 `sk-placeholder-key-not-set` 会被视为占位值并拒绝代理请求，避免误以为本地模型已配置。
+未登录或选择“不登录，使用开源版本”时会进入本地配置模式并清空前端旧 token；此时 `api.api_key` 必须替换为真实密钥，`your-api-key`、`your-api-key-here` 和 `sk-placeholder-key-not-set` 会被视为占位值并拒绝代理请求，避免误以为本地模型已配置。配置保存时，如果前端提交了占位密钥而本地配置文件已有真实密钥，后端会保留已有真实密钥，防止整份配置自动同步把 key 覆盖回占位值。
 
 ### 启动
 
@@ -240,7 +241,7 @@ parse_tool_calls_from_text()
 
 ### DeepSeek 推理链展示
 
-使用 DeepSeek 时，`reasoning` 字段通过 SSE 实时推送，前端以独立样式展示思考过程。
+使用 DeepSeek 时，`reasoning` 字段通过 SSE 实时推送，前端以独立样式展示思考过程。对于 DeepSeek Thinking Mode 的原生工具调用轮次，后端会在下一轮请求中保留 assistant `reasoning_content`；普通回复和旧 `deepseek-reasoner` 请求不会回传该字段，避免上游拒绝。
 
 ---
 
@@ -576,7 +577,7 @@ NagaAgent/
 ├── main.py                   # 统一入口，编排所有服务
 ├── build.py                  # 跨平台构建脚本
 ├── config.json               # 运行时配置（从 config.json.example 复制）
-├── pyproject.toml            # 版本 5.1.1，项目元数据与依赖
+├── pyproject.toml            # 版本 5.1.2，项目元数据与依赖
 │
 ├── apiserver/                # API Server（:8000）
 │   ├── api_server.py         #   FastAPI 主应用

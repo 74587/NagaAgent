@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from system.config import get_config, VERSION, build_system_prompt
+from system.config_value_utils import is_placeholder_api_key, preserve_existing_api_key_if_placeholder
 from system.config_manager import get_config_snapshot, update_config
 from system.live2d_assets import (
     create_custom_live2d_model,
@@ -53,9 +54,15 @@ def _notification_telemetry_snapshot(config_data: Dict[str, Any]) -> Dict[str, A
     }
 
 
-def _sanitize_system_config_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _sanitize_system_config_payload(
+    payload: Dict[str, Any],
+    current_config: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """清洗前端配置保存 payload，避免动态资源 URL 被持久化。"""
     sanitized = _normalize_system_config_aliases(copy.deepcopy(payload))
+    if current_config is not None:
+        preserve_existing_api_key_if_placeholder(sanitized, current_config)
+
     web_live2d = sanitized.get("web_live2d")
     if not isinstance(web_live2d, dict):
         return sanitized
@@ -157,7 +164,7 @@ async def get_system_info():
         version=VERSION,
         status="running",
         available_services=[],  # MCP服务现在由mcpserver独立管理
-        api_key_configured=bool(get_config().api.api_key and get_config().api.api_key != "sk-placeholder-key-not-set"),
+        api_key_configured=not is_placeholder_api_key(get_config().api.api_key),
     )
 
 
@@ -208,7 +215,7 @@ async def update_system_config(payload: Dict[str, Any]):
     try:
         before_snapshot = get_config_snapshot()
         before_notification = _notification_telemetry_snapshot(before_snapshot)
-        sanitized_payload = _sanitize_system_config_payload(payload)
+        sanitized_payload = _sanitize_system_config_payload(payload, before_snapshot)
 
         success = update_config(sanitized_payload)
         if success:

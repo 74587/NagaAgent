@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from apiserver import naga_auth
+from system.config_value_utils import is_placeholder_api_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -22,11 +23,6 @@ NAGABUSINESS_URL = "http://62.234.131.204:30031/v1/chat/completions"
 
 
 _DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
-_DEFAULT_API_KEYS = {
-    "",
-    "your-api-key-here",
-    "sk-placeholder-key-not-set",
-}
 
 
 def _is_user_configured_api() -> bool:
@@ -37,7 +33,7 @@ def _is_user_configured_api() -> bool:
         api_key = (getattr(naga_config.api, "api_key", "") or "").strip()
         if not user_base:
             return False
-        if user_base == _DEFAULT_BASE_URL and api_key in _DEFAULT_API_KEYS:
+        if is_placeholder_api_key(api_key):
             return False
         return True
     except Exception:
@@ -437,14 +433,13 @@ async def _stream_normalized_non_stream_response(body: Dict[str, Any]):
 
 async def _stream_buffered_with_fallback(body: Dict[str, Any]):
     events, model, run_id = await _fetch_upstream_stream_events(body)
-    content, tool_calls, finish_reason = _extract_stream_payload(events)
+    content, tool_calls, _finish_reason = _extract_stream_payload(events)
     clean_text, special_tool_calls = _extract_special_tool_calls(content)
     normalized_tool_calls = tool_calls or special_tool_calls
 
     has_meaningful_stream = bool(events) and (
         bool(clean_text.strip())
         or bool(normalized_tool_calls)
-        or bool(finish_reason)
     )
 
     if not has_meaningful_stream:

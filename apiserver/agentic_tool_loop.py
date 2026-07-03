@@ -1324,6 +1324,32 @@ def _convert_native_to_dispatch(native_calls: List[Dict[str, Any]]) -> List[Dict
     return result
 
 
+def _build_native_assistant_message(
+    clean_text: str,
+    calls: List[Dict[str, Any]],
+    reasoning_content: str = "",
+) -> Dict[str, Any]:
+    """构造 OpenAI 兼容的 assistant tool_calls 历史消息。"""
+    assistant_msg: Dict[str, Any] = {
+        "role": "assistant",
+        "content": clean_text or None,
+        "tool_calls": [
+            {
+                "id": c.get("_tool_call_id", f"call_{i}"),
+                "type": "function",
+                "function": {
+                    "name": c.get("_original_name", ""),
+                    "arguments": c.get("_original_args", "{}"),
+                },
+            }
+            for i, c in enumerate(calls)
+        ],
+    }
+    if reasoning_content.strip():
+        assistant_msg["reasoning_content"] = reasoning_content
+    return assistant_msg
+
+
 # ---------------------------------------------------------------------------
 # Agentic Loop 核心
 # ---------------------------------------------------------------------------
@@ -1477,22 +1503,7 @@ async def run_agentic_loop(
             if live2d_calls and not complete_text.strip() and use_native and round_num < max_rounds:
                 logger.info(f"[AgenticLoop] Round {round_num}: 模型仅返回 live2d 调用无正文，"
                             f"回注 tool result 继续下一轮获取文字回复")
-                # 构造 assistant message + tool results for live2d calls
-                assistant_msg = {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": c.get("_tool_call_id", f"call_{i}"),
-                            "type": "function",
-                            "function": {
-                                "name": c.get("_original_name", ""),
-                                "arguments": c.get("_original_args", "{}"),
-                            },
-                        }
-                        for i, c in enumerate(live2d_calls)
-                    ],
-                }
+                assistant_msg = _build_native_assistant_message("", live2d_calls, complete_reasoning)
                 messages.append(assistant_msg)
                 for c in live2d_calls:
                     messages.append({
@@ -1544,21 +1555,7 @@ async def run_agentic_loop(
         # 9. 将本轮LLM输出 + 工具结果注入消息历史
         if use_native:
             # 标准 function calling 格式：assistant message + tool messages
-            assistant_msg = {
-                "role": "assistant",
-                "content": clean_text or None,
-                "tool_calls": [
-                    {
-                        "id": c.get("_tool_call_id", f"call_{i}"),
-                        "type": "function",
-                        "function": {
-                            "name": c.get("_original_name", ""),
-                            "arguments": c.get("_original_args", "{}"),
-                        },
-                    }
-                    for i, c in enumerate(actionable_calls)
-                ],
-            }
+            assistant_msg = _build_native_assistant_message(clean_text, actionable_calls, complete_reasoning)
             messages.append(assistant_msg)
             for call_item, result_item in zip(actionable_calls, results):
                 messages.append({

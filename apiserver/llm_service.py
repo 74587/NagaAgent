@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import litellm
 from litellm import acompletion
 from fastapi import FastAPI, HTTPException
+from system.config_value_utils import is_placeholder_api_key
 from system.config import get_config
 from . import naga_auth
 
@@ -167,6 +168,52 @@ class LLMService:
             "api_base": (effective_base.rstrip("/") + "/" if effective_base else None),
         }
 
+    def _local_api_config_error(self, llm_params: Dict[str, Any]) -> Optional[str]:
+        """Return a user-facing configuration error for invalid local model settings."""
+        if naga_auth.should_use_model_gateway():
+            return None
+        if is_placeholder_api_key(llm_params.get("api_key")):
+            return "未配置本地模型 API 密钥：请填写真实 API Key，或登录后启用 NagaModel 网关。"
+        return None
+
+    def _supports_reasoning_replay(
+        self,
+        model_name: str,
+        api_base: Optional[str] = None,
+        provider: Optional[str] = None,
+    ) -> bool:
+        """DeepSeek Thinking Mode tool-call turns require replaying assistant reasoning_content."""
+        combined = " ".join(
+            str(part or "").lower()
+            for part in (model_name, api_base, provider)
+        )
+        if "deepseek-reasoner" in combined:
+            return False
+        return "deepseek" in combined
+
+    def _prepare_messages_for_model(
+        self,
+        messages: List[Dict[str, Any]],
+        model_name: str,
+        api_base: Optional[str] = None,
+        provider: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Strip or retain reasoning_content according to the target model contract."""
+        allow_reasoning_replay = self._supports_reasoning_replay(model_name, api_base, provider)
+        prepared: List[Dict[str, Any]] = []
+        for message in messages:
+            item = dict(message)
+            if "reasoning_content" in item:
+                can_replay = (
+                    allow_reasoning_replay
+                    and item.get("role") == "assistant"
+                    and bool(item.get("tool_calls"))
+                )
+                if not can_replay:
+                    item.pop("reasoning_content", None)
+            prepared.append(item)
+        return prepared
+
     # 不支持自定义 temperature 的模型约束表: {前缀: 强制值}
     _TEMPERATURE_CONSTRAINTS: Dict[str, float] = {
         "gpt-5": 1,
@@ -199,12 +246,16 @@ class LLMService:
 
         try:
             model_name = self._get_model_name()
+            llm_params = self._get_llm_params()
+            config_error = self._local_api_config_error(llm_params)
+            if config_error:
+                return LLMResponse(content=config_error)
             response = await acompletion(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self._normalize_temperature(model_name, temperature),
                 max_tokens=get_config().api.max_tokens,
-                **self._get_llm_params()
+                **llm_params
             )
             message = response.choices[0].message
             return LLMResponse(
@@ -252,12 +303,22 @@ class LLMService:
                 # openai 或未指定: 走原有 base_url 推断逻辑
                 model_name = self._get_model_name(model_name, final_base, provider_hint)
 
+            llm_params = self._get_overridden_llm_params(final_api_key, final_base)
+            config_error = self._local_api_config_error(llm_params)
+            if config_error:
+                return LLMResponse(content=config_error)
+            prepared_messages = self._prepare_messages_for_model(
+                messages,
+                model_name,
+                final_base,
+                provider_hint,
+            )
             response = await acompletion(
                 model=model_name,
-                messages=messages,
+                messages=prepared_messages,
                 temperature=self._normalize_temperature(model_name, temperature),
-                    max_tokens=get_config().api.max_tokens if hasattr(get_config().api, 'max_tokens') else None,
-                **self._get_overridden_llm_params(final_api_key, final_base)
+                max_tokens=get_config().api.max_tokens if hasattr(get_config().api, 'max_tokens') else None,
+                **llm_params
             )
             message = response.choices[0].message
             return LLMResponse(
@@ -345,9 +406,20 @@ class LLMService:
                              f"api_key_prefix={str(llm_params.get('api_key', ''))[:20]}... "
                              f"api_base={llm_params.get('api_base')}")
 
+                config_error = self._local_api_config_error(llm_params)
+                if config_error:
+                    yield self._format_sse_chunk("content", config_error)
+                    return
+
+                prepared_messages = self._prepare_messages_for_model(
+                    messages,
+                    model_name,
+                    str(llm_params.get("api_base") or ""),
+                    model_override.get("provider") if model_override else get_config().api.provider,
+                )
                 call_params = {
                     "model": model_name,
-                    "messages": messages,
+                    "messages": prepared_messages,
                     "temperature": self._normalize_temperature(model_name, temperature),
                     "max_tokens": get_config().api.max_tokens if hasattr(get_config().api, "max_tokens") else None,
                     "stream": True,
@@ -364,22 +436,29 @@ class LLMService:
                 response = await acompletion(**call_params)
 
                 # 累积器：tool_calls 增量拼接
-                pending_tool_calls = {}  # {index: {id, name, arguments}}
+                pending_tool_calls: Dict[int, Dict[str, str]] = {}  # {index: {id, name, arguments}}
+                saw_content = False
+                saw_reasoning = False
+                final_finish_reason: Optional[str] = None
 
                 async for chunk in response:
                     if not chunk.choices:
                         continue
 
-                    delta = chunk.choices[0].delta
+                    choice = chunk.choices[0]
+                    final_finish_reason = getattr(choice, "finish_reason", None) or final_finish_reason
+                    delta = choice.delta
 
                     # 处理 reasoning_content（思考过程）
                     reasoning = getattr(delta, "reasoning_content", None)
                     if reasoning:
+                        saw_reasoning = True
                         yield self._format_sse_chunk("reasoning", reasoning)
 
                     # 处理 content（正式回答）
                     content = getattr(delta, "content", None)
                     if content:
+                        saw_content = True
                         yield self._format_sse_chunk("content", content)
 
                     # 处理 tool_calls delta（原生 function calling）
@@ -402,6 +481,21 @@ class LLMService:
                     import json
                     calls = [pending_tool_calls[i] for i in sorted(pending_tool_calls)]
                     yield self._format_sse_chunk("tool_calls_native", json.dumps(calls, ensure_ascii=False))
+
+                if not saw_content and not saw_reasoning and not pending_tool_calls:
+                    logger.warning(
+                        "[LLM] 流式调用返回空响应: model=%s attempt=%s/%s finish_reason=%s",
+                        model_name,
+                        attempt + 1,
+                        max_attempts,
+                        final_finish_reason,
+                    )
+                    if attempt < max_attempts - 1:
+                        continue
+                    yield self._format_sse_chunk(
+                        "content",
+                        "模型服务返回空响应（无正文、无思考、无工具调用）。请稍后重试，或检查当前模型、API Key 与网关状态。",
+                    )
 
                 # 流式响应正常完成，跳出重试循环
                 return
