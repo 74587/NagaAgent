@@ -160,6 +160,8 @@ pip install -r requirements.txt
 
 支持所有 OpenAI 兼容 API（DeepSeek、通义千问、OpenAI、Ollama 等），也支持 Anthropic 原生格式（将 `api_format` 设为 `"anthropic"`）。登录 Naga 后默认使用 NagaModel 网关；如需使用本地密钥，在设置页关闭“使用 NagaModel 网关”，或将 `use_gateway` 设为 `false`。
 
+配置读取优先使用项目根目录下的 `config.json`；如果该文件不存在，才会回退到用户数据目录（Linux/macOS 为 `~/.naga/config.json`，Windows 为 `%APPDATA%/NagaAgent/config.json`）。设置页保存配置时会写回当前生效的配置文件。
+
 未登录或选择“不登录，使用开源版本”时会进入本地配置模式并清空前端旧 token；此时 `api.api_key` 必须替换为真实密钥，`your-api-key`、`your-api-key-here` 和 `sk-placeholder-key-not-set` 会被视为占位值并拒绝代理请求，避免误以为本地模型已配置。配置保存时，如果前端提交了占位密钥而本地配置文件已有真实密钥，后端会保留已有真实密钥，防止整份配置自动同步把 key 覆盖回占位值。
 
 ### 启动

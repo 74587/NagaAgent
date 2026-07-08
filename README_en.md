@@ -156,6 +156,8 @@ Copy `config.json.example` to `config.json` and fill in your LLM API credentials
 
 Works with any OpenAI-compatible API (DeepSeek, Qwen, OpenAI, Ollama, etc.), and also supports the native Anthropic format (set `api_format` to `"anthropic"`). After login, NagaModel Gateway is used by default; disable `use_gateway` in Terminal Settings to use your local provider credentials.
 
+Configuration is loaded from `config.json` in the project root first. If that file does not exist, NagaAgent falls back to the user data config (`~/.naga/config.json` on Linux/macOS, `%APPDATA%/NagaAgent/config.json` on Windows). The settings page writes back to the currently active config file.
+
 ### Launch
 
 ```bash

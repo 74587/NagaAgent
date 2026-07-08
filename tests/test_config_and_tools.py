@@ -164,6 +164,87 @@ class ConfigAndToolTests(unittest.TestCase):
             loaded = json.loads(runtime_config.read_text(encoding="utf-8"))
             self.assertEqual(loaded["api"]["model"], "demo-model")
 
+    def test_config_path_prefers_local_config_over_user_data(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            app_dir = tmp_path / "app"
+            user_dir = tmp_path / "user"
+            app_dir.mkdir()
+            user_dir.mkdir()
+            local_config = app_dir / "config.json"
+            user_config = user_dir / "config.json"
+            local_config.write_text('{"api": {"model": "local-model"}}', encoding="utf-8")
+            user_config.write_text('{"api": {"model": "user-model"}}', encoding="utf-8")
+
+            with (
+                patch.object(system_config, "IS_PACKAGED", False),
+                patch.object(system_config, "_get_app_dir", lambda: app_dir),
+                patch.object(system_config, "_get_user_data_dir", lambda: user_dir),
+            ):
+                self.assertEqual(Path(system_config.get_config_path()), local_config)
+
+    def test_config_path_falls_back_to_user_data_when_local_config_missing(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            app_dir = tmp_path / "app"
+            user_dir = tmp_path / "user"
+            app_dir.mkdir()
+
+            with (
+                patch.object(system_config, "IS_PACKAGED", False),
+                patch.object(system_config, "_get_app_dir", lambda: app_dir),
+                patch.object(system_config, "_get_user_data_dir", lambda: user_dir),
+            ):
+                self.assertEqual(Path(system_config.get_config_path()), user_dir / "config.json")
+                self.assertTrue(user_dir.exists())
+
+    def test_config_manager_updates_effective_local_config(self) -> None:
+        from system import config_manager as system_config_manager
+
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            app_dir = tmp_path / "app"
+            user_dir = tmp_path / "user"
+            app_dir.mkdir()
+            user_dir.mkdir()
+            local_config = app_dir / "config.json"
+            user_config = user_dir / "config.json"
+            local_config.write_text('{"api": {"model": "local-model"}}', encoding="utf-8")
+            user_config.write_text('{"api": {"model": "user-model"}}', encoding="utf-8")
+            reloads: list[str] = []
+
+            with (
+                patch.object(system_config, "IS_PACKAGED", False),
+                patch.object(system_config, "_get_app_dir", lambda: app_dir),
+                patch.object(system_config, "_get_user_data_dir", lambda: user_dir),
+                patch.object(system_config_manager, "hot_reload_config", lambda: reloads.append("reload")),
+            ):
+                success = system_config_manager.update_config({"api": {"model": "updated-local-model"}})
+
+            self.assertTrue(success)
+            self.assertEqual(json.loads(local_config.read_text(encoding="utf-8"))["api"]["model"], "updated-local-model")
+            self.assertEqual(json.loads(user_config.read_text(encoding="utf-8"))["api"]["model"], "user-model")
+            self.assertEqual(reloads, ["reload"])
+
+    def test_sync_source_config_skips_when_local_config_is_effective(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            app_dir = tmp_path / "app"
+            user_dir = tmp_path / "user"
+            app_dir.mkdir()
+            user_dir.mkdir()
+            local_config = app_dir / "config.json"
+            local_config.write_text('{"api": {"model": "local-model"}}', encoding="utf-8")
+
+            with (
+                patch.object(system_config, "IS_PACKAGED", False),
+                patch.object(system_config, "_get_app_dir", lambda: app_dir),
+                patch.object(system_config, "_get_user_data_dir", lambda: user_dir),
+            ):
+                self.assertFalse(system_config.sync_source_config_to_runtime())
+
+            self.assertFalse((user_dir / "config.json").exists())
+
     def test_should_use_model_gateway_respects_config(self) -> None:
         with (
             patch.object(naga_auth, "is_authenticated", lambda: False),

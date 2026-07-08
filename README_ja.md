@@ -156,6 +156,8 @@ pip install -r requirements.txt
 
 OpenAI互換の任意のAPI（DeepSeek、Qwen、OpenAI、Ollamaなど）で動作します。Anthropicネイティブフォーマットにも対応（`api_format`を`"anthropic"`に設定）。ログイン後は既定で NagaModel Gateway を使用します。ローカルのプロバイダー認証情報を使う場合は、ターミナル設定で `use_gateway` を無効化します。
 
+設定はまずプロジェクトルートの `config.json` から読み込まれます。このファイルがない場合のみ、ユーザーデータディレクトリの設定（Linux/macOS は `~/.naga/config.json`、Windows は `%APPDATA%/NagaAgent/config.json`）にフォールバックします。設定画面で保存すると、現在有効な設定ファイルへ書き戻されます。
+
 ### 起動
 
 ```bash

@@ -7,6 +7,7 @@ NagaAgent 配置系统 - 基于Pydantic实现类型安全和验证
 import os
 import sys
 import json
+import logging
 import re
 try:
     import tomllib
@@ -15,6 +16,10 @@ except ModuleNotFoundError:
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
 from datetime import datetime
+
+from charset_normalizer import from_path
+import json5  # 支持带注释的JSON解析
+from pydantic import BaseModel, Field, field_validator
 
 IS_PACKAGED: bool = getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
 
@@ -49,51 +54,54 @@ def _get_user_data_dir() -> Path:
 def get_data_dir() -> Path:
     """返回用户数据根目录（公共接口，供所有模块使用）
 
-    打包和开发模式均使用 ~/.naga（macOS/Linux）或 %APPDATA%/NagaAgent（Windows），
-    确保跨版本升级不丢失用户数据。
+    用于日志、会话、缓存等用户数据。运行时 config.json 会优先读取应用目录；
+    应用目录不存在 config.json 时才回退到这里。
     """
     d = _get_user_data_dir()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _migrate_config_if_needed(target: Path) -> None:
-    """首次运行时将项目目录下的 config.json 迁移到 ~/.naga/config.json"""
-    if target.exists():
-        return
-    project_config = Path(__file__).parent.parent / "config.json"
-    if project_config.exists():
-        try:
-            import shutil
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(project_config), str(target))
-            print(f"已迁移配置文件: {project_config} → {target}")
-        except Exception as e:
-            print(f"警告：迁移配置文件失败: {e}")
+def _get_app_dir() -> Path:
+    """返回应用配置所在目录：源码根目录或可执行文件目录。"""
+    if IS_PACKAGED:
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def _get_local_config_path() -> Path:
+    """返回应用目录下的 config.json 路径。"""
+    return _get_app_dir() / "config.json"
 
 
 def get_config_path() -> str:
-    """返回 config.json 的可写路径（始终使用用户数据目录）"""
-    d = get_data_dir()
-    target = d / "config.json"
-    _migrate_config_if_needed(target)
-    return str(target)
+    """返回当前生效 config.json 路径。
+
+    优先使用应用目录下的 config.json，便于开发者直接修改项目配置；
+    若不存在，则回退到用户数据目录中的 config.json。
+    """
+    local_config = _get_local_config_path()
+    if local_config.is_file():
+        return str(local_config)
+
+    return str(get_data_dir() / "config.json")
 
 
 def _get_project_config_template_paths(config_path: str) -> List[Path]:
     """返回可用于初始化运行时配置的模板候选路径。"""
     runtime_dir = Path(config_path).parent
-    project_root = Path(__file__).resolve().parent.parent
+    app_dir = _get_app_dir()
     if IS_PACKAGED:
         bundle_root = Path(sys._MEIPASS)  # type: ignore[attr-defined]
         return [
+            app_dir / "config.json.example",
             bundle_root / "config.json.example",
             bundle_root / "config.json",
         ]
     return [
         runtime_dir / "config.json.example",
-        project_root / "config.json.example",
-        project_root / "config.json",
+        app_dir / "config.json.example",
+        app_dir / "config.json",
     ]
 
 
@@ -142,15 +150,18 @@ def _merge_source_config_into_runtime(source_value, target_value, path: str = ""
 
 
 def sync_source_config_to_runtime() -> bool:
-    """源码运行时同步配置结构到用户数据目录，同时强制刷新模型相关配置。"""
+    """兼容旧启动流程；本地 config.json 已是生效配置时不再同步到用户目录。"""
     if IS_PACKAGED:
         return False
 
-    source = Path(__file__).parent.parent / "config.json"
+    source = _get_local_config_path()
     if not source.exists():
         return False
 
-    target = Path(get_data_dir()) / "config.json"
+    target = Path(get_config_path())
+    if target == source:
+        return False
+
     target.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -175,11 +186,6 @@ def sync_source_config_to_runtime() -> bool:
     except Exception as e:
         print(f"警告：同步源码配置失败: {e}")
         return False
-
-from pydantic import BaseModel, Field, field_validator
-from charset_normalizer import from_path
-import json5  # 支持带注释的JSON解析
-
 
 # ========== 服务器端口配置 - 统一管理 ==========
 class ServerPortsConfig(BaseModel):
@@ -1496,7 +1502,5 @@ except Exception:
 
 # 向后兼容的AI_NAME常量
 AI_NAME = config.system.ai_name
-
-import logging
 
 logger = logging.getLogger(__name__)

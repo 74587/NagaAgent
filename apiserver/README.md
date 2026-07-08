@@ -94,7 +94,7 @@ apiserver/
 | GET  | `/logs/context/statistics` | 日志上下文统计 |
 | GET  | `/logs/context/load` | 加载日志上下文 |
 
-`/system/config` 会读写用户数据目录中的运行时 `config.json`；缺失时由配置模板自动生成。模型连接字段包括 `api.provider`、`api.model`、`api.api_format` 和 `api.use_gateway`，用于区分本地模型供应商与 NagaModel 网关。保存配置时会过滤角色/自定义 Live2D 的运行时 `model.source`，只持久化 `custom_model_id` 等稳定字段；历史 `agentserver` / `mcpserver` 键会归一为 `agent_server` / `mcp_server`。
+`/system/config` 会读写当前生效的运行时 `config.json`：优先使用项目根目录配置；若项目根目录不存在 `config.json`，再回退到用户数据目录（Linux/macOS 为 `~/.naga/config.json`，Windows 为 `%APPDATA%/NagaAgent/config.json`），缺失时由配置模板自动生成。模型连接字段包括 `api.provider`、`api.model`、`api.api_format` 和 `api.use_gateway`，用于区分本地模型供应商与 NagaModel 网关。保存配置时会过滤角色/自定义 Live2D 的运行时 `model.source`，只持久化 `custom_model_id` 等稳定字段；历史 `agentserver` / `mcpserver` 键会归一为 `agent_server` / `mcp_server`。
 
 未登录且 `api.use_gateway=false` 时，OpenAI 兼容代理只接受真实本地 API 配置；`your-api-key-here` 与 `sk-placeholder-key-not-set` 会被识别为占位值并返回配置错误。
 
