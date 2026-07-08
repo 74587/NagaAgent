@@ -14,7 +14,7 @@ The future of Naga is yours to explore.
 
 [简体中文](README.md) | [English](README_en.md) | [日本語](README_ja.md)
 
-![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.2-blue?style=for-the-badge&logo=python&logoColor=white)
+![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.3-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPL%203.0%20%7C%20Proprietary-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
@@ -38,6 +38,7 @@ Commercial inquiries: contact@nagaagent.com / bilibili [柏斯阔落]
 
 | Date | Version | Changes |
 |------|---------|---------|
+| 🧭 2026-07-08 | 5.1.3 | Adjusted runtime config priority: project-root `config.json` is used first, with user data config as fallback; settings saves and docs now follow the active config file |
 | 🔐 2026-07-03 | 5.1.2 | Fixed local model API key persistence so frontend placeholders cannot overwrite real keys; empty streams now retry and show a visible error; DeepSeek Thinking Mode tool calls replay `reasoning_content` only when required |
 | 🚀 2026-06-20 | 5.1.1 | Custom Live2D model settings: Terminal Settings and Character Registration can upload complete model directories, store them under user data, and inject model URLs with the current API port |
 | 🧭 2026-06-20 | — | Network exploration control center enhanced: create OpenClaw exploration tasks per agent, set time / credit limits and initial browser policy, toggle browser visibility while running, and inspect raw history |
@@ -570,7 +571,7 @@ NagaAgent/
 ├── main.py                   # Unified entry point, orchestrates all services
 ├── build.py                  # Cross-platform build script
 ├── config.json               # Runtime config (copied from config.json.example)
-├── pyproject.toml            # Version 5.1.2, project metadata & dependencies
+├── pyproject.toml            # Version 5.1.3, project metadata & dependencies
 │
 ├── apiserver/                # API Server (:8000)
 │   ├── api_server.py         #   FastAPI main app

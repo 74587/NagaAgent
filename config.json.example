@@ -1,6 +1,6 @@
 {
   "system": {
-    "version": "5.1.2",
+    "version": "5.1.3",
     "voice_enabled": true,
     "stream_mode": true,
     "debug": false,
