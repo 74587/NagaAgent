@@ -515,7 +515,9 @@ onMounted(() => {
     if (!connected)
       return
     stopVersionWatch()
-    checkForUpdate()
+    void checkForUpdate().catch((error) => {
+      console.warn('[VersionCheck] Startup check failed:', error)
+    })
   })
 
   // 监听后端启动失败

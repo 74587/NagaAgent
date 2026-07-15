@@ -68,6 +68,8 @@ apiserver/
 | POST | `/tts/speech` | TTS 语音合成代理 |
 | POST | `/asr/transcribe` | ASR 语音识别代理 |
 
+`/tts/speech` 在启用且登录 NagaModel 网关时使用当前角色元数据中的 `voice`，否则转发到本地 Edge TTS。代理会保留上游 MP3/WAV 等真实媒体类型；只有无法识别容器且上游未声明音频类型时，才将响应按 24 kHz、16-bit、单声道 PCM 包装为 WAV。网关返回 401 时会使用已保存的 refresh token 刷新并重试一次，并通过 `X-Naga-Access-Token` 响应头把新 token 同步回桌面端。
+
 ### 会话管理 — `routes/session.py`
 
 | 方法 | 路径 | 说明 |
@@ -93,6 +95,8 @@ apiserver/
 | GET  | `/update/latest` | 检查版本更新 |
 | GET  | `/logs/context/statistics` | 日志上下文统计 |
 | GET  | `/logs/context/load` | 加载日志上下文 |
+
+`/update/latest` 以 `RTGS2017/NagaAgent` 的 GitHub Latest Release 为正式版本源，并按 `windows` / `macos` / `linux` 选择安装资源；GitHub 不可达时回退到 NagaBusiness 更新服务。两个来源都失败时返回 HTTP 502；仅回退源可用且其版本不高于本地版本时，前端也会显示检查失败，避免把“未能访问官方版本源”误报成“已是最新版本”。
 
 `/system/config` 会读写当前生效的运行时 `config.json`：优先使用项目根目录配置；若项目根目录不存在 `config.json`，再回退到用户数据目录（Linux/macOS 为 `~/.naga/config.json`，Windows 为 `%APPDATA%/NagaAgent/config.json`），缺失时由配置模板自动生成。模型连接字段包括 `api.provider`、`api.model`、`api.api_format` 和 `api.use_gateway`，用于区分本地模型供应商与 NagaModel 网关。保存配置时会过滤角色/自定义 Live2D 的运行时 `model.source`，只持久化 `custom_model_id` 等稳定字段；历史 `agentserver` / `mcpserver` 键会归一为 `agent_server` / `mcp_server`。
 

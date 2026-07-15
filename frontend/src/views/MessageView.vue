@@ -14,12 +14,43 @@ import { useTravel } from '@/travel/composables/useTravel'
 import { CONFIG } from '@/utils/config'
 import { live2dState } from '@/utils/live2dController'
 import { activeTabId, agentContacts, CURRENT_SESSION_ID, formatRelativeTime, getActiveTab, IS_TEMPORARY_SESSION, isAgentLoading, loadAgentMessages, loadCurrentSession, MESSAGES, newSession, switchSession, tabs } from '@/utils/session'
-import { clearSpeakQueue, isPlaying, queueSpeak, stop as stopTTS } from '@/utils/tts'
+import { isPlaying, queueSpeak, stop as stopTTS } from '@/utils/tts'
+import { TtsSentenceBuffer } from '@/utils/ttsText'
 import { setMessageViewExpanded } from '@/utils/uiState'
 
 const isSending = ref(false)
 const messageQueue: Array<{ content: string, options?: any }> = []
-const ttsEnabled = ref(localStorage.getItem('ttsEnabled') !== 'false')
+const ttsEnabled = computed(() => CONFIG.value.system.voice_enabled)
+
+function appendTtsText(buffer: TtsSentenceBuffer, text: string): void {
+  if (!ttsEnabled.value) {
+    buffer.clear()
+    return
+  }
+  for (const sentence of buffer.append(text))
+    queueSpeak(sentence)
+}
+
+function replaceTtsText(buffer: TtsSentenceBuffer, text: string): void {
+  if (!ttsEnabled.value) {
+    buffer.clear()
+    return
+  }
+
+  // 原始流可能已经包含文本式工具调用，先停止再使用服务端清理后的正文重建队列。
+  stopTTS()
+  buffer.replace(text)
+}
+
+function flushTtsText(buffer: TtsSentenceBuffer): void {
+  if (!ttsEnabled.value) {
+    buffer.clear()
+    return
+  }
+  const remainder = buffer.flush()
+  if (remainder)
+    queueSpeak(remainder)
+}
 
 function toolEventName(item: Record<string, any>): string {
   const service = item.service_name || item.agentType || '工具'
@@ -59,11 +90,8 @@ async function chatStreamInternal(content: string, options?: { skill?: string, i
     toolEvents: [],
   })
   const message = MESSAGES.value[MESSAGES.value.length - 1]!
-  // 追踪纯LLM内容（不含工具状态标记），用于TTS朗读
-  let spokenContent = ''
-
-  // 语音模式：开启时在流式输出中逐句送入 TTS 队列（文本始终实时显示）
-  const voiceSync = CONFIG.value.system.voice_enabled
+  // 开启语音时在流式输出中逐句送入 TTS 队列，文本始终实时显示。
+  const ttsBuffer = new TtsSentenceBuffer()
   let contentBuf = ''
   const pushContent = (text: string) => {
     contentBuf += text
@@ -72,9 +100,6 @@ async function chatStreamInternal(content: string, options?: { skill?: string, i
 
   live2dState.value = 'thinking'
   let compressTimer: ReturnType<typeof setTimeout> | undefined
-  // 逐句 TTS：在流式输出中检测句子边界，逐句送入 TTS 队列
-  let ttsSentenceBuf = ''
-
   // 记录当前轮次 content 流的起始位置，content_clean 只替换当前轮的 LLM 输出
   let roundContentStart = 0
 
@@ -95,33 +120,17 @@ async function chatStreamInternal(content: string, options?: { skill?: string, i
       }
       else if (chunk.type === 'content') {
         pushContent(chunk.text || '')
-        spokenContent += chunk.text
-        // 逐句 TTS：检测句子边界（。！？）并入队
-        if (voiceSync) {
-          ttsSentenceBuf += chunk.text || ''
-          const parts = ttsSentenceBuf.split(/(?<=[。！？])/)
-          if (parts.length > 1) {
-            for (let i = 0; i < parts.length - 1; i++) {
-              const s = parts[i]!.trim()
-              if (s && ttsEnabled.value)
-                queueSpeak(s)
-            }
-            ttsSentenceBuf = parts[parts.length - 1]!
-          }
-        }
+        appendTtsText(ttsBuffer, chunk.text || '')
       }
       else if (chunk.type === 'content_clean') {
         // 仅替换当前轮次的 LLM 输出（从 roundContentStart 开始），保留之前轮次的工具通知
         contentBuf = contentBuf.substring(0, roundContentStart) + (chunk.text || '')
         message.content = contentBuf
-        spokenContent = chunk.text || ''
-        // 内容被替换，清空待播放队列并重置句子缓冲
-        if (voiceSync) {
-          clearSpeakQueue()
-          ttsSentenceBuf = ''
-        }
+        replaceTtsText(ttsBuffer, chunk.text || '')
       }
       else if (chunk.type === 'tool_calls') {
+        // 工具执行可能耗时，先朗读清理后的引导语。
+        flushTtsText(ttsBuffer)
         // 显示工具调用状态
         const calls = chunk.calls || []
         const callDesc = calls.map((c: any) => toolEventName(c)).join(', ')
@@ -161,6 +170,9 @@ async function chatStreamInternal(content: string, options?: { skill?: string, i
         pushContent('\n---\n\n')
         // 新一轮开始，更新 content 起始位置
         roundContentStart = contentBuf.length
+      }
+      else if (chunk.type === 'round_end') {
+        flushTtsText(ttsBuffer)
       }
       else if (chunk.type === 'token_refreshed') {
         // 后端刷新了 token，同步到前端（防止后续轮询请求用旧 token 覆盖）
@@ -209,7 +221,6 @@ async function chatStreamInternal(content: string, options?: { skill?: string, i
           MESSAGES.value.splice(idx, 0, { role: 'info', content: chunk.text || '【已压缩上下文】' })
         }
       }
-      // round_end 不需要特殊处理
       window.dispatchEvent(new CustomEvent('token', { detail: chunk.text || '' }))
     }
 
@@ -219,12 +230,7 @@ async function chatStreamInternal(content: string, options?: { skill?: string, i
     if (!message.reasoning)
       delete message.reasoning
 
-    if (voiceSync && spokenContent) {
-      // 将剩余未成句的文本送入 TTS 队列
-      if (ttsSentenceBuf.trim() && ttsEnabled.value)
-        queueSpeak(ttsSentenceBuf.trim())
-      // Live2D 状态由 isPlaying watcher 自动驱动: talking ↔ idle
-    }
+    flushTtsText(ttsBuffer)
     if (!isPlaying.value) {
       live2dState.value = 'idle'
     }
@@ -316,9 +322,8 @@ function updateExpandedLayout() {
 }
 
 function toggleTTS() {
-  ttsEnabled.value = !ttsEnabled.value
-  localStorage.setItem('ttsEnabled', String(ttsEnabled.value))
-  if (!ttsEnabled.value) {
+  CONFIG.value.system.voice_enabled = !CONFIG.value.system.voice_enabled
+  if (!CONFIG.value.system.voice_enabled) {
     stopTTS() // 关闭时停止当前播放
   }
 }
@@ -742,6 +747,8 @@ function dispatchToActiveTab(content: string, options?: { skill?: string, images
 }
 
 async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string, images?: string[], voiceInput?: boolean }) {
+  stopTTS()
+
   if (!tab.instanceId) {
     tab.messages.push({ role: 'system', content: '干员实例未就绪，请稍后再试' })
     return
@@ -762,6 +769,7 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
     const assistantMsg = tab.messages[tab.messages.length - 1]!
     let contentBuf = ''
     let roundContentStart = 0
+    const ttsBuffer = new TtsSentenceBuffer()
 
     try {
       const { sessionId, response } = await API.chatStream(msg, {
@@ -785,10 +793,12 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
         else if (chunk.type === 'content') {
           contentBuf += chunk.text || ''
           assistantMsg.content = contentBuf
+          appendTtsText(ttsBuffer, chunk.text || '')
         }
         else if (chunk.type === 'content_clean') {
           contentBuf = contentBuf.substring(0, roundContentStart) + (chunk.text || '')
           assistantMsg.content = contentBuf
+          replaceTtsText(ttsBuffer, chunk.text || '')
         }
         else if (chunk.type === 'round_start' && (chunk.round ?? 0) > 1) {
           contentBuf += '\n---\n\n'
@@ -796,6 +806,7 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
           roundContentStart = contentBuf.length
         }
         else if (chunk.type === 'tool_calls') {
+          flushTtsText(ttsBuffer)
           const calls = chunk.calls || []
           assistantMsg.status = calls.length > 0
             ? `调度工具: ${calls.map(c => toolEventName(c)).join(', ')}`
@@ -824,6 +835,9 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
         else if (chunk.type === 'status') {
           assistantMsg.status = chunk.text || ''
         }
+        else if (chunk.type === 'round_end') {
+          flushTtsText(ttsBuffer)
+        }
         else if (chunk.type === 'compress_info') {
           const idx = tab.messages.indexOf(assistantMsg)
           if (idx > 0) {
@@ -835,6 +849,7 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
         }
         nextTick().then(scrollToBottom)
       }
+      flushTtsText(ttsBuffer)
     }
     catch (e: any) {
       const detail = e?.response?.data?.detail || e?.message || e
@@ -859,6 +874,8 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
 
   tab.messages.push({ role: 'assistant', content: '', generating: true, status: '思考中', sender: tab.name, toolEvents: [] })
   const assistantMsg = tab.messages[tab.messages.length - 1]!
+  const ttsBuffer = new TtsSentenceBuffer()
+  let receivedContent = false
 
   try {
     // 流式接收回复（使用新 API，内部自动 ensure_running）
@@ -867,10 +884,15 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
         assistantMsg.status = chunk.text
       }
       else if (chunk.type === 'content') {
+        receivedContent = true
         assistantMsg.content += chunk.text
+        appendTtsText(ttsBuffer, chunk.text)
       }
       else if (chunk.type === 'done') {
         assistantMsg.content = chunk.text // 用完整文本覆盖，防止拼接偏差
+        if (!receivedContent)
+          ttsBuffer.replace(chunk.text)
+        flushTtsText(ttsBuffer)
       }
       else if (chunk.type === 'error') {
         assistantMsg.content = `错误: ${chunk.text}`
@@ -898,6 +920,7 @@ async function sendToAgent(tab: ChatTab, msg: string, options?: { skill?: string
       }
       nextTick().then(scrollToBottom)
     }
+    flushTtsText(ttsBuffer)
   }
   catch (e: any) {
     const detail = e?.response?.data?.detail || e.message || e
@@ -1426,7 +1449,6 @@ function getSupportedMimeType(): string {
           <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
         </button>
         <button
-          v-if="CONFIG.system.voice_enabled"
           class="input-icon-btn shrink-0"
           :title="ttsEnabled ? '关闭语音播报' : '开启语音播报'"
           @click="toggleTTS"

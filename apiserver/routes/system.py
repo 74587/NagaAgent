@@ -7,6 +7,7 @@ import traceback
 from typing import Dict, Any, List
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from system.config import get_config, VERSION, build_system_prompt
@@ -60,6 +61,9 @@ def _sanitize_system_config_payload(
 ) -> Dict[str, Any]:
     """清洗前端配置保存 payload，避免动态资源 URL 被持久化。"""
     sanitized = _normalize_system_config_aliases(copy.deepcopy(payload))
+    system_config = sanitized.get("system")
+    if isinstance(system_config, dict):
+        system_config["version"] = VERSION
     if current_config is not None:
         preserve_existing_api_key_if_placeholder(sanitized, current_config)
 
@@ -173,6 +177,11 @@ async def get_system_config():
     """获取完整系统配置（web_live2d.model.source 由角色系统动态注入）"""
     try:
         config_data = _normalize_system_config_aliases(copy.deepcopy(get_config_snapshot()))
+        system_config = config_data.setdefault("system", {})
+        if not isinstance(system_config, dict):
+            system_config = {}
+            config_data["system"] = system_config
+        system_config["version"] = VERSION
 
         # 动态注入角色 Live2D 模型路径；未启用角色时按 custom_model_id 注入自定义模型路径。
         injected_model_source = False
@@ -457,30 +466,99 @@ async def remove_live2d_custom_model(model_id: str) -> Dict[str, Any]:
 
 # ============ 更新检查 ============
 
+_GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/RTGS2017/NagaAgent/releases/latest"
+_GITHUB_API_HEADERS = {
+    "Accept": "application/vnd.github+json",
+    "User-Agent": "NagaAgent-Update-Checker",
+    "X-GitHub-Api-Version": "2022-11-28",
+}
+_UPDATE_ASSET_SUFFIXES: Dict[str, tuple[str, ...]] = {
+    "windows": (".exe",),
+    "macos": (".dmg",),
+    "linux": (".appimage",),
+}
+
+
+def _select_github_release_asset(assets: List[Dict[str, Any]], platform: str) -> Dict[str, Any] | None:
+    suffixes = _UPDATE_ASSET_SUFFIXES.get(platform, _UPDATE_ASSET_SUFFIXES["linux"])
+    for asset in assets:
+        name = str(asset.get("name") or "").lower()
+        if name.endswith((".blockmap", ".yml", ".yaml")):
+            continue
+        if name.endswith(suffixes):
+            return asset
+    return None
+
+
+def _github_release_to_update_payload(release: Dict[str, Any], platform: str) -> Dict[str, Any]:
+    version = str(release.get("tag_name") or release.get("name") or "").strip().removeprefix("v")
+    if not version:
+        raise ValueError("GitHub Release 缺少版本号")
+
+    raw_assets = release.get("assets")
+    assets = raw_assets if isinstance(raw_assets, list) else []
+    asset = _select_github_release_asset(assets, platform)
+    return {
+        "version": version,
+        "description": str(release.get("body") or release.get("name") or "").strip(),
+        "force_update": False,
+        "download_url": asset.get("browser_download_url") if asset else None,
+        "file_size": asset.get("size") if asset else None,
+        "has_update": True,
+        "source": "github",
+        "release_url": release.get("html_url"),
+    }
+
+
+async def _fetch_github_latest_update(client: httpx.AsyncClient, platform: str) -> Dict[str, Any]:
+    response = await client.get(_GITHUB_LATEST_RELEASE_URL, headers=_GITHUB_API_HEADERS)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("GitHub Release 响应格式无效")
+    return _github_release_to_update_payload(payload, platform)
+
+
+async def _fetch_business_latest_update(client: httpx.AsyncClient, platform: str) -> Dict[str, Any]:
+    from apiserver import naga_auth
+
+    response = await client.get(
+        f"{naga_auth.BUSINESS_URL}/api/app/NagaAgent/latest",
+        params={"platform": platform},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or not payload.get("version"):
+        raise ValueError("业务更新服务未返回有效版本")
+
+    download_url = payload.get("download_url")
+    if download_url and not str(download_url).startswith(("http://", "https://")):
+        payload["download_url"] = f"{naga_auth.BUSINESS_URL}{download_url}"
+    payload["source"] = "business"
+    return payload
+
 
 @router.get("/update/latest")
-async def proxy_update_check(platform: str = "windows"):
-    """代理更新检查请求，避免前端直接暴露服务器地址"""
-    import httpx
-    from apiserver import naga_auth
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                f"{naga_auth.BUSINESS_URL}/api/app/NagaAgent/latest",
-                params={"platform": platform},
-            )
-            if resp.status_code == 404:
-                return {"has_update": False}
-            resp.raise_for_status()
-            data = resp.json()
-            # 将相对下载路径拼成完整URL（已经是绝对URL则跳过）
-            dl = data.get("download_url")
-            if dl and not dl.startswith(("http://", "https://")):
-                data["download_url"] = f"{naga_auth.BUSINESS_URL}{dl}"
-            return data
-    except Exception as e:
-        logger.warning(f"更新检查失败: {e}")
-        return {"has_update": False}
+async def proxy_update_check(platform: str = "windows") -> Dict[str, Any]:
+    """以 GitHub Release 为版本源，无法访问时回退到业务更新服务。"""
+    normalized_platform = platform if platform in _UPDATE_ASSET_SUFFIXES else "linux"
+    errors: List[str] = []
+
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        try:
+            return await _fetch_github_latest_update(client, normalized_platform)
+        except Exception as exc:
+            errors.append(f"GitHub: {exc}")
+            logger.warning("GitHub 更新检查失败，准备回退业务服务: %s", exc)
+
+        try:
+            return await _fetch_business_latest_update(client, normalized_platform)
+        except Exception as exc:
+            errors.append(f"Business: {exc}")
+            logger.warning("业务更新检查失败: %s", exc)
+
+    logger.error("全部更新源不可用: %s", "; ".join(errors))
+    raise HTTPException(status_code=502, detail="更新服务暂不可用，请稍后重试")
 
 
 # ============ 日志上下文 ============
