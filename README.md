@@ -15,7 +15,7 @@
 
 [简体中文](README.md) | [English](README_en.md) | [日本語](README_ja.md)
 
-![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.4-blue?style=for-the-badge&logo=python&logoColor=white)
+![NagaAgent](https://img.shields.io/badge/NagaAgent-5.1.5-blue?style=for-the-badge&logo=python&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-green?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPL%203.0%20%7C%20Proprietary-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
@@ -40,6 +40,7 @@
 
 | 日期 | 版本 | 内容 |
 |------|------|------|
+| 🪟 2026-07-16 | 5.1.5 | 修复 Windows 透明无边框主窗口在最大化后点击还原会消失的问题：避开 Electron 原生透明窗口最大化状态缺陷，基于当前显示器工作区可靠恢复尺寸；统一托盘、快捷键与单实例唤醒，并自动将屏幕外窗口移回可见区域 |
 | 🔊 2026-07-15 | 5.1.4 | 修复日常对话 TTS：统一设置页与聊天页语音开关，保留 `content_clean` 清理后的正文，覆盖主会话与干员会话，按真实 MP3/WAV 类型串行播放；更新检查改以 GitHub Release 为准，无法确认官方版本时明确显示失败 |
 | 🧭 2026-07-08 | 5.1.3 | 调整运行时配置读取优先级：优先使用项目根目录 `config.json`，不存在时再回退到用户数据目录；同步设置页保存目标与相关文档 |
 | 🔐 2026-07-03 | 5.1.2 | 修复本地模型 API Key 保存链路，避免前端占位密钥覆盖真实密钥；空流式响应改为重试并给出可见错误；DeepSeek Thinking Mode 工具调用按需保留 `reasoning_content` |
@@ -581,7 +582,7 @@ NagaAgent/
 ├── main.py                   # 统一入口，编排所有服务
 ├── build.py                  # 跨平台构建脚本
 ├── config.json               # 运行时配置（从 config.json.example 复制）
-├── pyproject.toml            # 版本 5.1.4，项目元数据与依赖
+├── pyproject.toml            # 版本 5.1.5，项目元数据与依赖
 │
 ├── apiserver/                # API Server（:8000）
 │   ├── api_server.py         #   FastAPI 主应用
